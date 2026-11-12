@@ -1013,6 +1013,26 @@ def test_table_cell_keeps_text_of_wrapped_runs(tmp_path):
     ]
 
 
+def test_table_cell_text_reads_symbols_like_a_paragraph(tmp_path):
+    """A table cell reads ``w:sym`` and Symbol font text like a body paragraph."""
+    document = Document()
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 1).text = "sym"
+    table.cell(1, 1).text = "font"
+    sym_paragraph = table.cell(0, 0).paragraphs[0]
+    sym_paragraph.add_run("20")
+    _append_sym(sym_paragraph, "Symbol", "F0B0")
+    table.cell(1, 0).paragraphs[0].add_run("a").font.name = "Symbol"
+    document.add_paragraph("20")
+    _append_sym(document.paragraphs[-1], "Symbol", "F0B0")
+
+    doc = _convert_built(document, tmp_path)
+
+    cells = [cell.text for cell in doc.tables[0].data.table_cells]
+    assert cells[0::2] == ["20\N{DEGREE SIGN}", "\N{GREEK SMALL LETTER ALPHA}"]
+    assert doc.texts[0].text == "20\N{DEGREE SIGN}"
+
+
 def _table_with_grid_before(
     tmp_path,
     *,
@@ -1861,6 +1881,42 @@ def test_invisible_spacer_logic():
         backend._is_invisible_spacer(Image.new("RGB", (50, 50), (100, 150, 200)))
         is False
     )  # coloured
+
+
+@pytest.mark.parametrize(
+    "address, fragment, expected",
+    [
+        (
+            "https://example.org/guide",
+            "installation",
+            "https://example.org/guide#installation",
+        ),
+        ("manual.docx", "Installation", "manual.docx#Installation"),
+        (
+            "https://example.org/guide#installation",
+            "",
+            "https://example.org/guide#installation",
+        ),
+    ],
+)
+def test_hyperlink_preserves_external_fragment(
+    tmp_path: Path, address: str, fragment: str, expected: str
+):
+    source = Document()
+    paragraph = source.add_paragraph()
+    rel_id = source.part.relate_to(address, RT.HYPERLINK, is_external=True)
+    hyperlink = etree.SubElement(paragraph._p, qn("w:hyperlink"))
+    hyperlink.set(qn("r:id"), rel_id)
+    hyperlink.set(qn("w:anchor"), fragment)
+    run = etree.SubElement(hyperlink, qn("w:r"))
+    etree.SubElement(run, qn("w:t")).text = "Install"
+
+    doc = _convert_built(source, tmp_path)
+
+    assert [(item.text, str(item.hyperlink)) for item in doc.texts] == [
+        ("Install", expected)
+    ]
+    assert doc.export_to_markdown() == f"[Install]({expected})"
 
 
 def test_malformed_hyperlink_does_not_abort_conversion(tmp_path):
